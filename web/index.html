@@ -1,0 +1,147 @@
+<!DOCTYPE html><html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>바람따라 (WindTrace) — 악취 발생원 추적</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Apple SD Gothic Neo',-apple-system,sans-serif;}
+  body{height:100vh;display:flex;flex-direction:column;color:#1f2a44;}
+  header{background:#26345f;color:#fff;padding:11px 18px;display:flex;align-items:center;gap:14px;}
+  header .logo{font-size:19px;font-weight:800;} header .logo span{font-size:12px;color:#9db4ef;font-weight:600;margin-left:6px;}
+  .wind{margin-left:auto;display:flex;align-items:center;gap:10px;background:#1c2950;padding:7px 14px;border-radius:20px;font-size:13px;}
+  .arrow{width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:22px;transition:transform .4s;}
+  .tabs{display:flex;background:#eef1f7;border-bottom:1px solid #dde2ec;}
+  .tabs button{flex:1;border:0;background:none;padding:13px;font-size:15px;font-weight:800;color:#8a93a3;cursor:pointer;}
+  .tabs button.on{color:#26345f;background:#fff;box-shadow:inset 0 -3px 0 #26345f;}
+  .wrap{flex:1;display:flex;min-height:0;}
+  #map{flex:1;}
+  .panel{width:330px;background:#fff;border-left:1px solid #e6e9ef;padding:18px;overflow:auto;}
+  .hint{font-size:13px;color:#7b8494;margin-bottom:14px;line-height:1.5;}
+  .lbl{font-size:13px;font-weight:800;margin:14px 0 7px;}
+  .opts{display:flex;gap:8px;}
+  .opt{flex:1;text-align:center;padding:11px 4px;border:2px solid #e6e9ef;border-radius:11px;font-size:14px;font-weight:700;cursor:pointer;background:#fafbfd;}
+  .opt.sel{border-color:#26345f;background:#eef2fb;color:#26345f;}
+  .btn{width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;background:#26345f;color:#fff;font-size:16px;font-weight:800;cursor:pointer;}
+  .btn.red{background:#e23b3b;} .btn.ghost{background:#eef1f7;color:#46505f;margin-top:10px;}
+  .card{background:#f6f8fc;border:1px solid #e8ebf2;border-radius:13px;padding:14px;margin-top:14px;}
+  .big{font-size:30px;font-weight:800;color:#e23b3b;} .src{font-size:15px;font-weight:800;}
+  .muted{font-size:12px;color:#8a94a4;} .pin-count{font-size:13px;color:#46505f;margin-top:10px;}
+  .legend{position:absolute;z-index:500;bottom:14px;left:14px;background:rgba(255,255,255,.92);padding:8px 11px;border-radius:9px;font-size:11.5px;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin:0 4px 0 2px;vertical-align:middle;}
+</style></head>
+<body>
+<header>
+  <div class="logo">바람따라 <span>WindTrace · 악취 발생원 추적</span></div>
+  <div class="wind"><div class="arrow" id="warrow">↑</div><span id="wtext">바람 불러오는 중…</span></div>
+</header>
+<div class="tabs">
+  <button id="tabReport" class="on" onclick="setMode('report')">시민 제보</button>
+  <button id="tabOps" onclick="setMode('ops')">관제 · 발생원 추정</button>
+</div>
+<div class="wrap">
+  <div id="map"></div>
+  <div class="panel" id="panel"></div>
+  <div class="legend">
+    <span class="dot" style="background:#e23b3b"></span>심함
+    <span class="dot" style="background:#f2b441"></span>보통
+    <span class="dot" style="background:#3fb36b"></span>약함
+    &nbsp;|&nbsp;<span class="dot" style="background:#7a3030"></span>추정 발생원
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const CENTER=[37.5075,126.6743];
+let map=L.map('map',{zoomControl:true}).setView(CENTER,13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(map);
+let mode='report', draft=null, draftMarker=null, layers=[], srcLayer=null;
+let sel={type:'탄내',intensity:3};
+
+async function loadWind(){
+  try{const w=await (await fetch(`/api/wind?lat=${CENTER[0]}&lng=${CENTER[1]}`)).json();
+    if(w.wind_from_deg!=null){
+      document.getElementById('warrow').style.transform=`rotate(${(w.wind_from_deg+180)%360}deg)`;
+      document.getElementById('wtext').textContent=`풍향 ${Math.round(w.wind_from_deg)}° · ${w.wind_speed}km/h · ${w.temp??''}℃`;
+    }}catch(e){document.getElementById('wtext').textContent='바람 수신 실패';}
+}
+function clearLayers(){layers.forEach(l=>map.removeLayer(l));layers=[];}
+function color(i){return i>=3?'#e23b3b':i==2?'#f2b441':'#3fb36b';}
+
+async function loadReports(){
+  clearLayers();
+  const rs=await (await fetch('/api/reports')).json();
+  rs.forEach(r=>{const m=L.circleMarker([r.lat,r.lng],{radius:8,color:'#fff',weight:2,
+    fillColor:color(r.intensity),fillOpacity:.9}).addTo(map).bindPopup(`${r.type} · 강도 ${r.intensity} · ${r.ts||''}`);
+    layers.push(m);});
+  return rs.length;
+}
+
+function setMode(m){mode=m;
+  document.getElementById('tabReport').classList.toggle('on',m=='report');
+  document.getElementById('tabOps').classList.toggle('on',m=='ops');
+  if(srcLayer){srcLayer.forEach(l=>map.removeLayer(l));srcLayer=null;}
+  render();
+}
+function render(){
+  const p=document.getElementById('panel');
+  if(mode=='report'){
+    p.innerHTML=`<div class="hint">지도에서 <b>냄새 난 위치</b>를 탭하세요. 위치·시각은 자동 기록됩니다.</div>
+    <div class="lbl">냄새 종류</div><div class="opts" id="ty"></div>
+    <div class="lbl">강도</div><div class="opts" id="it"></div>
+    <button class="btn" onclick="submit()">제보하기</button>
+    <div class="pin-count" id="pc"></div>`;
+    chips('ty',['탄내','하수','가스'],v=>sel.type=v,sel.type);
+    chips('it',[['약',1],['보통',2],['심함',3]],v=>sel.intensity=v,sel.intensity,true);
+    updateCount();
+  }else{
+    p.innerHTML=`<div class="hint">시민 제보 + <b>실시간 풍향</b>을 역확산 AI로 결합해 <b>발생원을 추정</b>합니다.</div>
+    <button class="btn red" onclick="estimate()">발생원 추정</button>
+    <div id="result"></div>
+    <button class="btn ghost" onclick="clearAll()">데모 초기화</button>`;
+  }
+}
+function chips(id,arr,cb,cur,isPair){const el=document.getElementById(id);el.innerHTML='';
+  arr.forEach(a=>{const[label,val]=isPair?a:[a,a];const d=document.createElement('div');
+    d.className='opt'+((val==cur)?' sel':'');d.textContent=label;
+    d.onclick=()=>{cb(val);[...el.children].forEach(c=>c.classList.remove('sel'));d.classList.add('sel');};
+    el.appendChild(d);});}
+
+map.on('click',e=>{if(mode!='report')return;draft=e.latlng;
+  if(draftMarker)map.removeLayer(draftMarker);
+  draftMarker=L.marker(e.latlng).addTo(map).bindPopup('여기서 냄새남 (제보 대기)').openPopup();});
+
+async function submit(){if(!draft){alert('지도에서 냄새 난 위치를 먼저 탭하세요.');return;}
+  await fetch('/api/report',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({lat:draft.lat,lng:draft.lng,intensity:sel.intensity,type:sel.type})});
+  if(draftMarker){map.removeLayer(draftMarker);draftMarker=null;}draft=null;
+  await loadReports();updateCount();}
+async function updateCount(){const n=await loadReports();const pc=document.getElementById('pc');if(pc)pc.textContent=`현재 제보 ${n}건`;}
+
+async function estimate(){
+  const res=document.getElementById('result');res.innerHTML='<div class="card">추정 중…</div>';
+  const o=await (await fetch('/api/estimate')).json();
+  if(srcLayer){srcLayer.forEach(l=>map.removeLayer(l));}srcLayer=[];
+  if(!o.source){res.innerHTML=`<div class="card">${o.message||'제보 부족'}</div>`;return;}
+  // heat cells
+  (o.heat||[]).forEach(c=>{const m=L.circleMarker([c.lat,c.lng],{radius:3+7*c.w,stroke:false,
+    fillColor:'#e23b3b',fillOpacity:.12+.25*c.w}).addTo(map);srcLayer.push(m);});
+  // source marker
+  const s=L.marker([o.source.lat,o.source.lng],{icon:L.divIcon({className:'',html:
+    '<div style="width:26px;height:26px;border-radius:50%;background:#e23b3b;border:4px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)"></div>',iconSize:[26,26],iconAnchor:[13,13]})}).addTo(map);
+  srcLayer.push(s);
+  map.setView([o.source.lat,o.source.lng],14);
+  res.innerHTML=`<div class="card">
+    <div class="src">추정 발생원</div>
+    <div class="big">${Math.round(o.confidence*100)}%</div><div class="muted">확신도</div>
+    <div style="margin-top:10px;font-size:14px"><b>${o.facility?o.facility.name:'미상'}</b>
+      ${o.facility?`<span class="muted">(${o.facility.dist_m}m)</span>`:''}</div>
+    <div class="muted" style="margin-top:8px">풍향 ${o.wind_from_deg}° → 풍하 ${o.downwind_deg}° · ${o.wind_speed}km/h · 제보 ${o.n}건</div>
+    <div class="muted" style="margin-top:6px">${o.message}</div>
+  </div>`;
+}
+async function clearAll(){if(!confirm('제보를 모두 지울까요? (데모 초기화)'))return;
+  await fetch('/api/clear',{method:'POST'});if(srcLayer){srcLayer.forEach(l=>map.removeLayer(l));srcLayer=null;}
+  await loadReports();render();}
+
+const _p=new URLSearchParams(location.search);
+loadWind();setInterval(loadWind,300000);loadReports();
+if(_p.get('view')==='ops'){ setMode('ops'); setTimeout(()=>estimate(), 1600); } else { render(); }
+</script></body></html>
