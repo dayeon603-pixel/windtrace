@@ -3,6 +3,17 @@
 > 인천 공공데이터·AI 경진대회 **제품·서비스 개발 부문** 시연용 MVP.
 > 의존성: Python3 + numpy 만. (fastapi 등 설치 불필요)
 
+## 🌐 온라인 데모 배포 (원클릭, API 키 불필요)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/dayeon603-pixel/windtrace)
+
+1. 위 **Deploy to Render** 버튼 클릭 → Render 무료 회원가입(GitHub 로그인)
+2. Render가 `render.yaml`을 자동 인식 → **Apply/Deploy** 클릭
+3. 1~2분 뒤 `https://windtrace.onrender.com` 형태의 **공개 URL** 발급
+- 키 불필요: 기상청 키 없이도 **Open-Meteo 실시간 풍향**으로 작동(가점용 기상청 키는 Render Environment에 `KMA_SERVICE_KEY` 추가 시 활성).
+- 무료 플랜은 15분 미사용 시 잠자기 → 첫 접속 콜드스타트 ~30초(심사 직전 1회 깨우기 권장).
+- 첫 방문 시 **샘플 제보 5건 자동 시드** → [관제] 탭 → [발생원 추정] 누르면 바로 결과.
+
 ## ▶ 실행 (한 줄)
 ```bash
 cd app
